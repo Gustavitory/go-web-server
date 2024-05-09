@@ -38,7 +38,7 @@ func createRootFile(text string) (file *os.File, e error) {
 	fmt.Printf("textFile is open")
 	defer textFile.Close()
 
-	textFileInsideZip, err := zipWriter.Create("content/" + textFile.Name())
+	textFileInsideZip, err := zipWriter.Create("content/text.txt")
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func createRootFile(text string) (file *os.File, e error) {
 	if _, err := io.Copy(textFileInsideZip, textFile); err != nil {
 		return nil, err
 	}
-
+	zipWriter.Close()
 	return zipFile, nil
 }
 
