@@ -6,60 +6,77 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
 )
 
 const keyServerAddrs string = "serverAddrs"
+const zipFileName string = "archive.zip"
+const textFileName string = "text.txt"
 
-func ErrorChecker(err error) {
+func createRootFile(text string) (file *os.File, e error) {
+	err := os.WriteFile(textFileName, []byte(text), 0644)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
+	fmt.Printf("file created successfully")
+
+	zipFile, err := os.Create(zipFileName)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("zip created successfully")
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+
+	textFile, err := os.Open(textFileName)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("textFile is open")
+	defer textFile.Close()
+
+	textFileInsideZip, err := zipWriter.Create("content/" + textFile.Name())
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := io.Copy(textFileInsideZip, textFile); err != nil {
+		return nil, err
+	}
+
+	return zipFile, nil
 }
 
-func getRoot(w http.ResponseWriter, r *http.Request) {
-	textFileName := "text.txt"
+func getRoot(txtContent string) (f string, e error) {
+	file, err := createRootFile(txtContent)
+	if err != nil {
+		return "", err
+	}
+	return file.Name(), nil
+}
 
-	hasText := r.URL.Query().Has("text")
+func getRootHandler(w http.ResponseWriter, r *http.Request) {
 	text := ""
+	hasText := r.URL.Query().Has("text")
 	if hasText {
 		text = r.URL.Query().Get("text")
 	} else {
 		text = "default text"
 	}
-
-	//creamos el archivo
-	err := os.WriteFile(textFileName, []byte(text), 0644)
+	file, err := getRoot(text)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error creating file.")
+		http.Error(w, "Error creating file.", http.StatusInternalServerError)
+		return
 	}
-	fmt.Printf("file created successfully")
 
-	archive, err := os.Create("archive.zip")
-	ErrorChecker(err)
-	defer archive.Close()
-
-	zipWriter := zip.NewWriter(archive)
-	//abrimos el archivo
-	file, err := os.Open(textFileName)
-	ErrorChecker(err)
-	defer file.Close()
-
-	w1, err := zipWriter.Create("content/text.txt")
-	ErrorChecker(err)
-
-	if _, err := io.Copy(w1, file); err != nil {
-		panic(err)
-	}
-	defer zipWriter.Close()
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=archive.zip")
+	w.Header().Set("Content-Disposition", "attachment; filename="+zipFileName)
 
-	http.ServeFile(w, r, "archive.zip")
-
+	http.ServeFile(w, r, file)
 }
 
 func getHello(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +87,7 @@ func getHello(w http.ResponseWriter, r *http.Request) {
 
 func server() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", getRoot)
+	mux.HandleFunc("/", getRootHandler)
 	mux.HandleFunc("/hello", getHello)
 
 	ctx := context.Background()
@@ -86,6 +103,7 @@ func server() error {
 	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("server closed\n")
+		return nil
 	} else if err != nil {
 		fmt.Printf("error listening for server: %s\n", err)
 		return err
@@ -95,9 +113,7 @@ func server() error {
 
 func main() {
 	err := server()
-	if errors.Is(err, http.ErrServerClosed) {
-		fmt.Printf("Server closed\n")
-	} else if err != nil {
+	if err != nil {
 		fmt.Printf("error starting server: %s\n", err)
 		os.Exit(1)
 	}
